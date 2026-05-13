@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dashboard Comparativo - Atendimentos</title>
+
+<!-- Biblioteca para importar XLSX/XLS/CSV -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+:root{
+  --primary:#10b981;
+  --bg:#0f172a;
+  --card:#111827;
+  --card2:#1f2937;
+  --text:#f8fafc;
+  --muted:#94a3b8;
+  --border:#334155;
+  --danger:#ef4444;
+  --warning:#f59e0b;
+  --good:#22c55e;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:Arial, Helvetica, sans-serif;
+  background:linear-gradient(135deg,var(--bg),#020617);
+  color:var(--text);
+}
+.container{padding:22px;max-width:1500px;margin:auto}
+.header{
+  display:flex;justify-content:space-between;gap:16px;align-items:center;
+  margin-bottom:18px;flex-wrap:wrap;
+}
+h1{margin:0;font-size:28px;color:var(--primary)}
+.subtitle{color:var(--muted);margin-top:6px}
+.panel,.card,.chartBox{
+  background:rgba(17,24,39,.92);
+  border:1px solid var(--border);
+  border-radius:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.25);
+}
+.panel{padding:16px;margin-bottom:16px}
+.controls{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(150px,1fr));
+  gap:12px;
+}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+input,select,button{
+  width:100%;
+  background:#020617;
+  color:var(--text);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px;
+}
+select[multiple]{height:110px}
+button{cursor:pointer;background:var(--primary);border:0;color:#04111b;font-weight:bold}
+button.secondary{background:#334155;color:var(--text)}
+button.danger{background:#ef4444;color:white}
+.importBox{
+  border:2px dashed var(--border);
+  padding:14px;
+  border-radius:14px;
+  background:rgba(2,6,23,.45);
+}
+.status{margin-top:10px;color:var(--muted);font-size:13px;line-height:1.45}
+.status.ok{color:#86efac}
+.status.err{color:#fca5a5}
+.kpis{
+  display:grid;
+  grid-template-columns:repeat(7,minmax(150px,1fr));
+  gap:14px;
+  margin-bottom:16px;
+}
+.card{padding:16px}
+.card .name{color:var(--muted);font-size:13px}
+.card .value{font-size:28px;font-weight:800;margin-top:6px}
+.card .hint{font-size:12px;color:var(--muted);margin-top:4px}
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+}
+.chartBox{padding:16px;min-height:320px}
+.chartTitle{font-weight:bold;margin-bottom:8px}
+canvas{width:100%;height:260px;background:#020617;border-radius:12px}
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+th,td{
+  padding:9px;
+  border-bottom:1px solid var(--border);
+  text-align:left;
+  white-space:nowrap;
+}
+th{color:var(--muted);position:sticky;top:0;background:#111827}
+.tableWrap{max-height:450px;overflow:auto;border-radius:12px;border:1px solid var(--border)}
+.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-weight:bold;font-size:12px}
+.good{background:rgba(34,197,94,.15);color:#86efac}
+.warn{background:rgba(245,158,11,.18);color:#fcd34d}
+.bad{background:rgba(239,68,68,.18);color:#fca5a5}
+.small{font-size:12px;color:var(--muted)}
+@media(max-width:1100px){
+  .controls,.kpis{grid-template-columns:repeat(2,1fr)}
+  .grid{grid-template-columns:1fr}
+}
+@media(max-width:650px){
+  .controls,.kpis{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>📊 Dashboard Comparativo - Atendimentos</h1>
+      <div class="subtitle">Importa 3 arquivos ou mais por dia, consolida, calcula pico por horário e tempo aguardando.</div>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="secondary" onclick="saveData()">💾 Salvar base</button>
+      <button class="secondary" onclick="exportCSV()">⬇️ Exportar CSV</button>
+      <button class="danger" onclick="clearAll()">🗑️ Limpar</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="controls">
+      <div class="importBox" style="grid-column:span 2">
+        <label>Importar planilhas do dia (.xlsx, .xls ou .csv)</label>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" multiple />
+        <div id="importStatus" class="status">Selecione 3 arquivos ou mais do mesmo dia, ou arquivos de dias diferentes para comparar.</div>
+      </div>
+      <div>
+        <label>Dias</label>
+        <select id="dayFilter" multiple></select>
+      </div>
+      <div>
+        <label>Atendentes</label>
+        <select id="agentFilter" multiple></select>
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="statusFilter" multiple></select>
+      </div>
+      <div>
+        <label>Busca</label>
+        <input id="searchInput" placeholder="Protocolo, contato, número..." />
+      </div>
+      <div>
+        <label>Hora inicial</label>
+        <select id="hourStartFilter">
+          <option value="">Todas</option>
+          <option value="0">00h</option><option value="1">01h</option><option value="2">02h</option><option value="3">03h</option>
+          <option value="4">04h</option><option value="5">05h</option><option value="6">06h</option><option value="7">07h</option>
+          <option value="8">08h</option><option value="9">09h</option><option value="10">10h</option><option value="11">11h</option>
+          <option value="12">12h</option><option value="13">13h</option><option value="14">14h</option><option value="15">15h</option>
+          <option value="16">16h</option><option value="17">17h</option><option value="18">18h</option><option value="19">19h</option>
+          <option value="20">20h</option><option value="21">21h</option><option value="22">22h</option><option value="23">23h</option>
+        </select>
+      </div>
+      <div>
+        <label>Hora final</label>
+        <select id="hourEndFilter">
+          <option value="">Todas</option>
+          <option value="0">00h</option><option value="1">01h</option><option value="2">02h</option><option value="3">03h</option>
+          <option value="4">04h</option><option value="5">05h</option><option value="6">06h</option><option value="7">07h</option>
+          <option value="8">08h</option><option value="9">09h</option><option value="10">10h</option><option value="11">11h</option>
+          <option value="12">12h</option><option value="13">13h</option><option value="14">14h</option><option value="15">15h</option>
+          <option value="16">16h</option><option value="17">17h</option><option value="18">18h</option><option value="19">19h</option>
+          <option value="20">20h</option><option value="21">21h</option><option value="22">22h</option><option value="23">23h</option>
+        </select>
+      </div>
+      <div>
+        <label>Meta SLA atendimento</label>
+        <input id="slaInput" type="number" value="15" min="1" step="1" />
+      </div>
+      <div>
+        <label>Cor principal</label>
+        <input id="primaryColor" type="color" value="#10b981" />
+      </div>
+      <div>
+        <label>Cor fundo</label>
+        <input id="bgColor" type="color" value="#0f172a" />
+      </div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="card"><div class="name">Total</div><div id="kTotal" class="value">0</div><div class="hint">Atendimentos filtrados</div></div>
+    <div class="card"><div class="name">Atendentes</div><div id="kAgents" class="value">0</div><div class="hint">Com atendimento</div></div>
+    <div class="card"><div class="name">Média atendimento</div><div id="kAvg" class="value">0min</div><div class="hint">Tempo efetivo</div></div>
+    <div class="card"><div class="name">Média geral aguardando</div><div id="kWait" class="value">0min</div><div class="hint">Todos atendimentos: duração - tempo atendimento</div></div>
+    <div class="card"><div class="name">Total aguardando</div><div id="kWaitTotal" class="value">0min</div><div class="hint">Soma de todo tempo em fila</div></div>
+    <div class="card"><div class="name">Média aguardando no horário</div><div id="kHourWaitTotal" class="value">0min</div><div class="hint">Média de espera dos atendimentos filtrados</div></div>
+    <div class="card"><div class="name">Fila em atendimento no horário</div><div id="kHourServiceTotal" class="value">0min</div><div class="hint">Soma do tempo sendo atendido no filtro de hora</div></div>
+    <div class="card"><div class="name">Pico horário</div><div id="kPeak" class="value">--</div><div id="peakInfo" class="hint">Sem dados</div></div>
+    <div class="card"><div class="name">SLA dentro</div><div id="kSla" class="value">0%</div><div class="hint">Pela meta configurada</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="chartBox"><div class="chartTitle">🟢 Quantidade de atendimentos por horário</div><canvas id="hourChart" width="700" height="280"></canvas></div>
+    <div class="chartBox"><div class="chartTitle">📅 Volume por dia</div><canvas id="dayChart" width="700" height="280"></canvas></div>
+    <div class="chartBox"><div class="chartTitle">👤 Atendimentos por atendente</div><canvas id="agentChart" width="700" height="280"></canvas></div>
+    <div class="chartBox"><div class="chartTitle">⏳ Média aguardando por atendente</div><canvas id="waitChart" width="700" height="280"></canvas></div>
+  </div>
+
+  <div class="grid" style="margin-top:16px">
+    <div class="chartBox"><div class="chartTitle">🟠 Média aguardando por atendimento / horário</div><canvas id="waitHourChart" width="700" height="280"></canvas></div>
+    <div class="chartBox"><div class="chartTitle">🔵 Média tempo em atendimento / horário</div><canvas id="serviceHourChart" width="700" height="280"></canvas></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h3>⏱️ Fila por horário</h3>
+    <div class="small">Mostra quantidade, média e soma de tempo aguardando e tempo em atendimento por hora.</div>
+    <div class="tableWrap">
+      <table id="hourQueueTable">
+        <thead>
+          <tr><th>Hora</th><th>Qtd</th><th>Média aguardando</th><th>Total aguardando</th><th>Média em atendimento</th><th>Total em atendimento</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h3>🏆 Ranking por atendente</h3>
+    <div class="tableWrap">
+      <table id="rankTable">
+        <thead>
+          <tr><th>#</th><th>Atendente</th><th>Qtd</th><th>Média atendimento</th><th>Média aguardando</th><th>SLA</th><th>Score</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>📋 Detalhes</h3>
+    <div class="small">Mostrando até 800 registros na tela. A exportação CSV leva todos os registros filtrados.</div>
+    <div class="tableWrap">
+      <table id="detailTable">
+        <thead>
+          <tr>
+            <th>Dia</th><th>Hora</th><th>Protocolo</th><th>Contato</th><th>Número</th>
+            <th>Atendente</th><th>Status</th><th>Duração</th><th>Tempo atendimento</th>
+            <th>Aguardando</th><th>Arquivo</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+let allData = [];
+let filtered = [];
+
+function cleanHeader(s){
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]/g,'')
+    .trim();
+}
+
+function pick(obj, names){
+  const keys = Object.keys(obj);
+  for(const n of names){
+    const wanted = cleanHeader(n);
+    for(const k of keys){
+      if(cleanHeader(k) === wanted) return obj[k] ?? '';
+    }
+  }
+  return '';
+}
+
+function parseTempo(v){
+  if(v === null || v === undefined) return 0;
+  let s = String(v).trim().toLowerCase();
+  if(!s || s === '-' || s === 'null' || s === 'undefined') return 0;
+
+  // Excel pode vir como número de dias
+  if(typeof v === 'number' && isFinite(v)){
+    // se for menor que 1, provavelmente fração de dia
+    if(v > 0 && v < 1) return Math.round(v * 86400);
+    return Math.round(v);
+  }
+
+  let total = 0;
+  const h = s.match(/(\d+(?:[,.]\d+)?)\s*h/);
+  const m = s.match(/(\d+(?:[,.]\d+)?)\s*(min|m)\b/);
+  const sec = s.match(/(\d+(?:[,.]\d+)?)\s*(s|seg)/);
+  if(h) total += parseFloat(h[1].replace(',','.')) * 3600;
+  if(m) total += parseFloat(m[1].replace(',','.')) * 60;
+  if(sec) total += parseFloat(sec[1].replace(',','.'));
+  if(total) return Math.round(total);
+
+  // formato hh:mm:ss ou mm:ss
+  if(/^\d{1,2}:\d{2}(:\d{2})?$/.test(s)){
+    const p = s.split(':').map(Number);
+    if(p.length === 3) return p[0]*3600 + p[1]*60 + p[2];
+    return p[0]*60 + p[1];
+  }
+
+  const n = parseFloat(s.replace(',','.'));
+  return isFinite(n) ? Math.round(n) : 0;
+}
+
+function parseDateBR(v){
+  if(v instanceof Date && !isNaN(v)) return v;
+  if(typeof v === 'number' && isFinite(v)){
+    // Excel serial date
+    const utcDays = Math.floor(v - 25569);
+    const utcValue = utcDays * 86400;
+    const dateInfo = new Date(utcValue * 1000);
+    const fractional = v - Math.floor(v);
+    const totalSeconds = Math.round(fractional * 86400);
+    dateInfo.setUTCHours(0,0,0,0);
+    dateInfo.setSeconds(dateInfo.getSeconds() + totalSeconds);
+    return dateInfo;
+  }
+  const s = String(v || '').trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(m){
+    return new Date(+m[3], +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+  }
+  let d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function fmtDateBR(d){
+  if(!d) return '';
+  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear();
+}
+
+function fmt(sec){
+  sec = Math.max(0, Math.round(sec || 0));
+  if(sec < 60) return sec + 's';
+  const m = Math.round(sec / 60);
+  if(m < 60) return m + 'min';
+  return Math.floor(m/60) + 'h ' + (m%60) + 'min';
+}
+
+function esc(s){
+  return String(s ?? '').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+}
+
+function normRow(o, arquivo){
+  const dataRaw = pick(o, ['Data','Data criação','Data criacao','Criado em','Abertura']);
+  const dt = parseDateBR(dataRaw);
+  const dia = dt ? fmtDateBR(dt) : String(dataRaw || '').slice(0,10);
+  const hora = dt ? dt.getHours() : null;
+
+  const dur = pick(o, ['Duracao','Duração','Tempo total','Tempo Total']);
+  const tempo = pick(o, ['Tempo de atendimento','Tempo atendimento','Atendimento']);
+
+  const durSeg = parseTempo(dur);
+  const atendimentoSeg = parseTempo(tempo);
+  const aguardandoSeg = Math.max(0, durSeg - atendimentoSeg);
+
+  return {
+    protocolo: String(pick(o, ['Protocolo','ID','Ticket']) || '').trim(),
+    data: String(dataRaw || ''),
+    ultimaAtualizacao: String(pick(o, ['Ultima atualizacao','Última atualização','Atualizacao','Atualização']) || ''),
+    dia, hora,
+    contato: String(pick(o, ['Contato','Cliente','Nome']) || ''),
+    numero: String(pick(o, ['Numero','Número','Telefone','WhatsApp']) || ''),
+    atendente: String(pick(o, ['Atendente','Operador','Responsavel','Responsável']) || 'Sem atendente').trim() || 'Sem atendente',
+    departamento: String(pick(o, ['Departamento']) || ''),
+    status: String(pick(o, ['Status','Situacao','Situação']) || ''),
+    fluxo: String(pick(o, ['Fluxo']) || ''),
+    duracao: String(dur || ''),
+    tempoAtendimento: String(tempo || ''),
+    duracaoSegundos: durSeg,
+    tempoSegundos: atendimentoSeg,
+    aguardandoSegundos: aguardandoSeg,
+    arquivo
+  };
+}
+
+function sheetToRows(workbook, fileName){
+  const sheetName = workbook.SheetNames[0];
+  const ws = workbook.Sheets[sheetName];
+  if(!ws) throw new Error('Nenhuma aba encontrada');
+  const raw = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+  return raw.map(r => normRow(r, fileName)).filter(r => r.protocolo || r.data || r.contato);
+}
+
+function parseCSV(text, fileName){
+  const wb = XLSX.read(text, {type:'string'});
+  return sheetToRows(wb, fileName);
+}
+
+async function readFile(file){
+  if(typeof XLSX === 'undefined'){
+    throw new Error('Biblioteca XLSX não carregou. Verifique se o navegador tem internet ou tente abrir no Chrome/Edge.');
+  }
+  const name = file.name.toLowerCase();
+  if(name.endsWith('.csv')){
+    return parseCSV(await file.text(), file.name);
+  }
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, {type:'array', cellDates:true});
+  return sheetToRows(wb, file.name);
+}
+
+async function importFiles(files){
+  const status = document.getElementById('importStatus');
+  status.className = 'status';
+  status.textContent = 'Importando ' + files.length + ' arquivo(s)...';
+
+  let imported = [];
+  let errors = [];
+
+  for(const f of files){
+    try{
+      const rows = await readFile(f);
+      imported.push(...rows);
+    }catch(e){
+      errors.push(f.name + ': ' + e.message);
+    }
+  }
+
+  if(imported.length){
+    addRows(imported);
+  }
+
+  if(errors.length){
+    status.className = 'status err';
+    status.innerHTML = 'Importados: ' + imported.length + ' registros.<br>Erros:<br>' + errors.map(esc).join('<br>');
+  }else{
+    status.className = 'status ok';
+    status.textContent = '✅ Importação concluída. Registros importados: ' + imported.length + '. Registros consolidados: ' + allData.length + '.';
+  }
+}
+
+function addRows(rows){
+  const map = new Map();
+  for(const r of allData){
+    const key = r.protocolo ? ('P:'+r.protocolo) : ('K:'+r.data+'|'+r.contato+'|'+r.numero);
+    map.set(key, r);
+  }
+  for(const r of rows){
+    if(!r.protocolo && !r.data && !r.contato) continue;
+    const key = r.protocolo ? ('P:'+r.protocolo) : ('K:'+r.data+'|'+r.contato+'|'+r.numero);
+    map.set(key, r);
+  }
+  allData = Array.from(map.values());
+  populateFilters();
+  applyFilters();
+}
+
+function fillSelect(id, vals){
+  const el = document.getElementById(id);
+  const selected = Array.from(el.selectedOptions).map(o => o.value);
+  el.innerHTML = vals.map(v => '<option value="'+esc(v)+'" '+(selected.includes(v)?'selected':'')+'>'+esc(v)+'</option>').join('');
+}
+function selected(id){
+  return Array.from(document.getElementById(id).selectedOptions).map(o => o.value);
+}
+function populateFilters(){
+  fillSelect('dayFilter', Array.from(new Set(allData.map(r => r.dia).filter(Boolean))).sort());
+  fillSelect('agentFilter', Array.from(new Set(allData.map(r => r.atendente).filter(Boolean))).sort());
+  fillSelect('statusFilter', Array.from(new Set(allData.map(r => r.status).filter(Boolean))).sort());
+}
+
+function applyFilters(){
+  const ds = selected('dayFilter');
+  const ag = selected('agentFilter');
+  const st = selected('statusFilter');
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const hStartVal = document.getElementById('hourStartFilter') ? document.getElementById('hourStartFilter').value : '';
+  const hEndVal = document.getElementById('hourEndFilter') ? document.getElementById('hourEndFilter').value : '';
+  const hStart = hStartVal === '' ? null : Number(hStartVal);
+  const hEnd = hEndVal === '' ? null : Number(hEndVal);
+
+  filtered = allData.filter(r =>
+    (!ds.length || ds.includes(r.dia)) &&
+    (!ag.length || ag.includes(r.atendente)) &&
+    (!st.length || st.includes(r.status)) &&
+    (hStart === null || Number(r.hora) >= hStart) &&
+    (hEnd === null || Number(r.hora) <= hEnd) &&
+    (!q || JSON.stringify(r).toLowerCase().includes(q))
+  );
+  render();
+}
+
+function avg(arr){
+  arr = arr.filter(x => isFinite(x));
+  return arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : 0;
+}
+
+function groupBy(arr, fn){
+  const m = new Map();
+  for(const r of arr){
+    const k = fn(r);
+    if(k === null || k === undefined || k === '') continue;
+    if(!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
+  }
+  return m;
+}
+
+function render(){
+  const slaMin = Number(document.getElementById('slaInput').value || 15);
+  const slaSec = slaMin * 60;
+  document.getElementById('kTotal').textContent = filtered.length;
+  document.getElementById('kAgents').textContent = new Set(filtered.map(r=>r.atendente)).size;
+  document.getElementById('kAvg').textContent = fmt(avg(filtered.map(r=>r.tempoSegundos)));
+  const waitSecondsAll = filtered.map(r=>r.aguardandoSegundos);
+  document.getElementById('kWait').textContent = fmt(avg(waitSecondsAll));
+  const waitTotal = waitSecondsAll.reduce((a,b)=>a+(Number(b)||0),0);
+  const waitTotalEl = document.getElementById('kWaitTotal');
+  if(waitTotalEl) waitTotalEl.textContent = fmt(waitTotal);
+  const hourWaitEl = document.getElementById('kHourWaitTotal');
+  const hourServiceEl = document.getElementById('kHourServiceTotal');
+  if(hourWaitEl) hourWaitEl.textContent = fmt(avg(filtered.map(r=>r.aguardandoSegundos)));
+  if(hourServiceEl) hourServiceEl.textContent = fmt(filtered.reduce((a,r)=>a+(Number(r.tempoSegundos)||0),0));
+  const slaPct = filtered.length ? Math.round(filtered.filter(r=>r.tempoSegundos <= slaSec).length / filtered.length * 100) : 0;
+  document.getElementById('kSla').textContent = slaPct + '%';
+
+  const hour = groupBy(filtered, r => r.hora);
+  const peak = Array.from(hour.entries()).sort((a,b)=>b[1].length-a[1].length)[0];
+  document.getElementById('kPeak').textContent = peak ? String(peak[0]).padStart(2,'0')+'h' : '--';
+  document.getElementById('peakInfo').textContent = peak ? peak[1].length + ' atendimentos' : 'Sem dados';
+
+  const day = groupBy(filtered, r => r.dia);
+  const agent = groupBy(filtered, r => r.atendente);
+
+  drawBar('hourChart', Array.from(hour.entries()).sort((a,b)=>a[0]-b[0]).map(([k,v])=>[String(k).padStart(2,'0')+'h',v.length]), '', '#22c55e');
+  drawBar('dayChart', Array.from(day.entries()).sort().map(([k,v])=>[k,v.length]));
+  drawBar('agentChart', Array.from(agent.entries()).sort((a,b)=>b[1].length-a[1].length).slice(0,15).map(([k,v])=>[k,v.length]));
+  drawBar('waitChart', Array.from(agent.entries()).map(([k,v])=>[k,Math.round(avg(v.map(r=>r.aguardandoSegundos))/60)]).sort((a,b)=>b[1]-a[1]).slice(0,15), 'min');
+
+  renderHourQueues(hour);
+
+  renderRanking(agent, slaSec);
+  renderDetails();
+}
+
+
+function renderHourQueues(hourMap){
+  const rows = Array.from(hourMap.entries()).sort((a,b)=>a[0]-b[0]).map(([h,v]) => {
+    const waitTotal = v.reduce((a,r)=>a+(Number(r.aguardandoSegundos)||0),0);
+    const serviceTotal = v.reduce((a,r)=>a+(Number(r.tempoSegundos)||0),0);
+    return {
+      hora: String(h).padStart(2,'0')+'h',
+      qtd: v.length,
+      waitTotal,
+      waitAvg: avg(v.map(r=>r.aguardandoSegundos)),
+      serviceTotal,
+      serviceAvg: avg(v.map(r=>r.tempoSegundos))
+    };
+  });
+
+  if(document.getElementById('waitHourChart')) drawBar('waitHourChart', rows.map(r=>[r.hora, Math.round(r.waitAvg/60)]), 'min', '#f97316');
+  if(document.getElementById('serviceHourChart')) drawBar('serviceHourChart', rows.map(r=>[r.hora, Math.round(r.serviceAvg/60)]), 'min', '#3b82f6');
+
+  const tbody = document.querySelector('#hourQueueTable tbody');
+  if(tbody){
+    tbody.innerHTML = rows.map(r =>
+      '<tr>'+
+        '<td>'+esc(r.hora)+'</td>'+
+        '<td>'+r.qtd+'</td>'+
+        '<td>'+fmt(r.waitAvg)+'</td>'+
+        '<td>'+fmt(r.waitTotal)+'</td>'+
+        '<td>'+fmt(r.serviceAvg)+'</td>'+
+        '<td>'+fmt(r.serviceTotal)+'</td>'+
+      '</tr>'
+    ).join('');
+  }
+}
+
+function renderRanking(agentMap, slaSec){
+  const rows = Array.from(agentMap.entries()).map(([a,v]) => {
+    const media = avg(v.map(r=>r.tempoSegundos));
+    const wait = avg(v.map(r=>r.aguardandoSegundos));
+    const sla = v.length ? Math.round(v.filter(r=>r.tempoSegundos <= slaSec).length / v.length * 100) : 0;
+    const score = Math.max(0, Math.min(100, Math.round((sla*.55) + Math.min(40, v.length*1.2) - (media/60*.7) - (wait/60*.35))));
+    return {a,qtd:v.length,media,wait,sla,score};
+  }).sort((x,y)=>y.score-x.score || y.qtd-x.qtd);
+
+  document.querySelector('#rankTable tbody').innerHTML = rows.map((r,i) =>
+    '<tr>'+
+      '<td>'+(i+1)+'</td>'+
+      '<td>'+esc(r.a)+'</td>'+
+      '<td>'+r.qtd+'</td>'+
+      '<td>'+fmt(r.media)+'</td>'+
+      '<td>'+fmt(r.wait)+'</td>'+
+      '<td><span class="pill '+(r.sla>=85?'good':r.sla>=65?'warn':'bad')+'">'+r.sla+'%</span></td>'+
+      '<td><span class="pill '+(r.score>=75?'good':r.score>=55?'warn':'bad')+'">'+r.score+'</span></td>'+
+    '</tr>'
+  ).join('');
+}
+
+function renderDetails(){
+  document.querySelector('#detailTable tbody').innerHTML = filtered.slice(0,800).map(r =>
+    '<tr>'+
+      '<td>'+esc(r.dia)+'</td>'+
+      '<td>'+(r.hora !== null && r.hora !== undefined ? String(r.hora).padStart(2,'0')+'h' : '')+'</td>'+
+      '<td>'+esc(r.protocolo)+'</td>'+
+      '<td>'+esc(r.contato)+'</td>'+
+      '<td>'+esc(r.numero)+'</td>'+
+      '<td>'+esc(r.atendente)+'</td>'+
+      '<td>'+esc(r.status)+'</td>'+
+      '<td>'+esc(r.duracao)+'</td>'+
+      '<td>'+esc(r.tempoAtendimento)+'</td>'+
+      '<td>'+fmt(r.aguardandoSegundos)+'</td>'+
+      '<td>'+esc(r.arquivo)+'</td>'+
+    '</tr>'
+  ).join('');
+}
+
+function drawBar(id, data, suffix='', color=null){
+  const c = document.getElementById(id);
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0,0,W,H);
+
+  if(!data.length){
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '16px Arial';
+    ctx.fillText('Sem dados', 25, 35);
+    return;
+  }
+
+  const max = Math.max(...data.map(d=>d[1]), 1);
+  const left = 45, bottom = 58, top = 20, right = 15;
+  const usable = W-left-right;
+  const gap = usable / data.length;
+  const bw = Math.max(8, gap * .62);
+  ctx.strokeStyle = '#334155';
+  ctx.beginPath();
+  ctx.moveTo(left, top);
+  ctx.lineTo(left, H-bottom);
+  ctx.lineTo(W-right, H-bottom);
+  ctx.stroke();
+
+  data.forEach((d,i)=>{
+    const x = left + i*gap + (gap-bw)/2;
+    const h = (H-bottom-top) * (d[1]/max);
+    const y = H-bottom-h;
+    ctx.fillStyle = color || getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#10b981';
+    ctx.fillRect(x,y,bw,h);
+    ctx.fillStyle = '#e5e7eb';
+    ctx.font = '11px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(d[1]) + suffix, x+bw/2, Math.max(12,y-6));
+    ctx.save();
+    ctx.translate(x+bw/2, H-bottom+13);
+    ctx.rotate(-Math.PI/5);
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(String(d[0]).slice(0,14), 0, 0);
+    ctx.restore();
+  });
+}
+
+function saveData(){
+  localStorage.setItem('dashboard_atendimento_base', JSON.stringify(allData));
+  localStorage.setItem('dashboard_atendimento_primary', document.getElementById('primaryColor').value);
+  localStorage.setItem('dashboard_atendimento_bg', document.getElementById('bgColor').value);
+  localStorage.setItem('dashboard_atendimento_sla', document.getElementById('slaInput').value);
+  alert('Base e configurações salvas neste navegador.');
+}
+
+function clearAll(){
+  if(confirm('Deseja limpar a base atual e a base salva?')){
+    allData = [];
+    filtered = [];
+    localStorage.removeItem('dashboard_atendimento_base');
+    populateFilters();
+    applyFilters();
+    document.getElementById('importStatus').className = 'status';
+    document.getElementById('importStatus').textContent = 'Base limpa. Importe as planilhas novamente.';
+  }
+}
+
+function exportCSV(){
+  const head = ['Dia','Hora','Protocolo','Contato','Numero','Atendente','Status','Duracao','Tempo Atendimento','Tempo Aguardando','Arquivo'];
+  const rows = filtered.map(r => [r.dia,r.hora,r.protocolo,r.contato,r.numero,r.atendente,r.status,r.duracao,r.tempoAtendimento,fmt(r.aguardandoSegundos),r.arquivo]);
+  const csv = [head, ...rows].map(row => row.map(v => '"' + String(v ?? '').replace(/"/g,'""') + '"').join(';')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'relatorio_atendimentos_filtrado.csv';
+  a.click();
+}
+
+function applyColors(){
+  document.documentElement.style.setProperty('--primary', document.getElementById('primaryColor').value);
+  document.documentElement.style.setProperty('--bg', document.getElementById('bgColor').value);
+}
+
+document.getElementById('fileInput').addEventListener('change', e => importFiles(Array.from(e.target.files)));
+['dayFilter','agentFilter','statusFilter','searchInput','slaInput','hourStartFilter','hourEndFilter'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('input', applyFilters);
+});
+document.getElementById('primaryColor').addEventListener('input', applyColors);
+document.getElementById('bgColor').addEventListener('input', applyColors);
+
+(function init(){
+  document.getElementById('primaryColor').value = localStorage.getItem('dashboard_atendimento_primary') || '#10b981';
+  document.getElementById('bgColor').value = localStorage.getItem('dashboard_atendimento_bg') || '#0f172a';
+  document.getElementById('slaInput').value = localStorage.getItem('dashboard_atendimento_sla') || '15';
+  applyColors();
+  try{
+    allData = JSON.parse(localStorage.getItem('dashboard_atendimento_base') || '[]') || [];
+  }catch(e){ allData = []; }
+  populateFilters();
+  applyFilters();
+
+  if(typeof XLSX === 'undefined'){
+    document.getElementById('importStatus').className = 'status err';
+    document.getElementById('importStatus').textContent = 'A biblioteca de importação XLSX não carregou. Abra no Chrome/Edge com internet ativa ou me peça a versão offline.';
+  }
+})();
+</script>
+</body>
+</html>
